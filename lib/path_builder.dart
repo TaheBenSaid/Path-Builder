@@ -116,6 +116,10 @@ class _DrawingCanvasState extends State<DrawingCanvas> {
                     onPressed: _exportDrawing,
                     child: const Text('Export'),
                   ),
+                  ElevatedButton(
+                    onPressed: _startNewPath, // New button for starting a new path
+                    child: const Text('New Path'),
+                  ),
                 ],
               ),
             ),
@@ -189,7 +193,14 @@ class _DrawingCanvasState extends State<DrawingCanvas> {
     });
   }
 
-
+  void _startNewPath() {
+    setState(() {
+      currentSegment = null; // Clear the current segment
+      startPoint = null; // Reset starting point
+      endPoint = null; // Reset ending point
+      isDrawing = false; // Reset drawing state
+    });
+  }
 
   void _undo() {
     setState(() {
