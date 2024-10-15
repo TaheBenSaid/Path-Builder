@@ -2,9 +2,12 @@ import 'dart:io';
 import 'dart:ui' as ui;
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter_svg/svg.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:gallery_saver/gallery_saver.dart';
 import 'package:flutter_colorpicker/flutter_colorpicker.dart';
+import 'package:permission_handler/permission_handler.dart';
+import 'package:file_picker/file_picker.dart';
 
 void main() {
   runApp(const MyApp());
@@ -90,9 +93,10 @@ class _DrawingCanvasState extends State<DrawingCanvas> {
               ),
             ),
             ...segments.expand((segment) => [
-              _buildHandle(segment.start, segment.startControl, true, segment),
-              _buildHandle(segment.end, segment.endControl, false, segment),
-            ]),
+                  _buildHandle(
+                      segment.start, segment.startControl, true, segment),
+                  _buildHandle(segment.end, segment.endControl, false, segment),
+                ]),
             Positioned(
               bottom: 16,
               left: 16,
@@ -117,7 +121,12 @@ class _DrawingCanvasState extends State<DrawingCanvas> {
                     child: const Text('Export'),
                   ),
                   ElevatedButton(
-                    onPressed: _startNewPath, // New button for starting a new path
+                    onPressed: _importDrawing,
+                    child: const Text('Import'),
+                  ),
+                  ElevatedButton(
+                    onPressed:
+                        _startNewPath, // New button for starting a new path
                     child: const Text('New Path'),
                   ),
                 ],
@@ -129,7 +138,8 @@ class _DrawingCanvasState extends State<DrawingCanvas> {
     );
   }
 
-  Widget _buildHandle(Offset point, Offset control, bool isStart, SegmentElement segment) {
+  Widget _buildHandle(
+      Offset point, Offset control, bool isStart, SegmentElement segment) {
     return Positioned(
       left: control.dx - 5,
       top: control.dy - 5,
@@ -166,7 +176,8 @@ class _DrawingCanvasState extends State<DrawingCanvas> {
         // Check if eraser is active
         if (isEraserActive) {
           segments.removeWhere((segment) =>
-          segment.start.distanceSquared <= 100.0 || segment.end.distanceSquared <= 100.0);
+              segment.start.distanceSquared <= 100.0 ||
+              segment.end.distanceSquared <= 100.0);
           isDrawing = false; // Reset drawing state after erasing
         } else {
           currentSegment = SegmentElement(
@@ -237,33 +248,67 @@ class _DrawingCanvasState extends State<DrawingCanvas> {
     });
   }
 
-  void _exportDrawing() async {
-    try {
-      final recorder = ui.PictureRecorder();
-      final canvas = Canvas(recorder);
-      final size = MediaQuery.of(context).size;
-
-      final painter = DrawingPainter(segments, null);
-      painter.paint(canvas, size);
-
-      final picture = recorder.endRecording();
-      final img = await picture.toImage(size.width.toInt(), size.height.toInt());
-      final pngBytes = await img.toByteData(format: ui.ImageByteFormat.png);
-
-      final directory = await getApplicationDocumentsDirectory();
-      final file = File('${directory.path}/drawing.png');
-      await file.writeAsBytes(pngBytes!.buffer.asUint8List());
-
-      await GallerySaver.saveImage(file.path);
-
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Drawing saved to gallery')),
-      );
-    } catch (e) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Error saving drawing')),
-      );
+  Future<void> _importDrawing() async {
+    final result = await FilePicker.platform
+        .pickFiles(type: FileType.custom, allowedExtensions: ['svg']);
+    if (result != null && result.files.isNotEmpty) {
+      setState(() {
+        SvgPicture.file(
+          File(result.files.first.path!),
+          width: 800, // Set your desired width
+          height: 600, // Set your desired height
+        );
+      });
     }
+  }
+
+  void _exportDrawing() async {
+
+    final svgPath = StringBuffer();
+    svgPath.write(
+        '<svg xmlns="http://www.w3.org/2000/svg" width="800" height="600">\n');
+
+    if (segments.isNotEmpty) {
+      svgPath
+          .write('<path d="M${segments[0].start.dx},${segments[0].start.dy} ');
+
+      for (int i = 0; i < segments.length; i++) {
+        if (segments[i].startControl == null) {
+          if (segments[i].endControl == null) {
+            svgPath.write('L${segments[i].end.dx},${segments[i].end.dy} ');
+          } else {
+            svgPath.write(
+                'Q${segments[i].endControl.dx},${segments[i].endControl.dy},${segments[i].end.dx},${segments[i].end.dy} ');
+          }
+        } else {
+          if (segments[i].endControl == null) {
+            svgPath.write(
+                'Q${segments[i].startControl.dx},${segments[i].startControl.dy},${segments[i].end.dx},${segments[i].end.dy} ');
+          } else {
+            svgPath.write(
+                'C${segments[i].startControl.dx},${segments[i].startControl.dy},${segments[i].endControl.dx},${segments[i].endControl.dy},${segments[i].end.dx},${segments[i].end.dy} ');
+          }
+        }
+      }
+
+      svgPath.write('" stroke="black" fill="none" stroke-width="4"/>\n');
+    }
+
+    svgPath.write('</svg>');
+
+    // Get the directory to save the SVG
+    final directory = await getApplicationDocumentsDirectory();
+    final svgPathFile = '${directory.path}/exported_shape.svg';
+    // Write the SVG to a file
+    final file = await File(svgPathFile).writeAsString(svgPath.toString());
+
+    // Display a message and print the file path
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text('SVG shape exported to ${file.path}')),
+    );
+
+    // Print the path in the console
+    print('SVG file saved at: ${file.path}');
   }
 
   void _changeColor() {
@@ -353,9 +398,12 @@ class SegmentElement {
     Path path = Path()
       ..moveTo(start.dx, start.dy)
       ..cubicTo(
-        startControl.dx, startControl.dy,
-        endControl.dx, endControl.dy,
-        end.dx, end.dy,
+        startControl.dx,
+        startControl.dy,
+        endControl.dx,
+        endControl.dy,
+        end.dx,
+        end.dy,
       );
 
     canvas.drawPath(path, paint);
