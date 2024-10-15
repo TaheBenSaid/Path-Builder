@@ -4,6 +4,7 @@ import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:gallery_saver/gallery_saver.dart';
+import 'package:flutter_colorpicker/flutter_colorpicker.dart';
 
 void main() {
   runApp(const MyApp());
@@ -18,6 +19,10 @@ class MyApp extends StatelessWidget {
       title: 'My Custom Drawing App',
       theme: ThemeData(
         primarySwatch: Colors.blue,
+        brightness: Brightness.light,
+      ),
+      darkTheme: ThemeData(
+        brightness: Brightness.dark,
       ),
       home: const DrawingCanvas(),
     );
@@ -41,6 +46,8 @@ class _DrawingCanvasState extends State<DrawingCanvas> {
   Offset? startPoint;
   Offset? endPoint;
   bool isDrawing = false;
+  bool isEraserActive = false; // Flag for eraser tool
+  final int maxSegments = 100; // Limit on the number of segments
 
   @override
   void dispose() {
@@ -61,6 +68,13 @@ class _DrawingCanvasState extends State<DrawingCanvas> {
           IconButton(
             icon: const Icon(Icons.line_weight),
             onPressed: _changeStrokeWidth,
+          ),
+          IconButton(
+            icon: Icon(
+              isEraserActive ? Icons.brush : Icons.delete,
+              color: isEraserActive ? Colors.red : null,
+            ),
+            onPressed: _toggleEraser,
           ),
         ],
       ),
@@ -144,21 +158,38 @@ class _DrawingCanvasState extends State<DrawingCanvas> {
         isDrawing = true;
       } else {
         endPoint = details.localPosition;
-        currentSegment = SegmentElement(
-          color: currentColor,
-          strokeWidth: currentStrokeWidth,
-          start: startPoint!,
-          end: endPoint!,
-          startControl: startPoint! + const Offset(50, -50),
-          endControl: endPoint! + const Offset(-50, -50),
-        );
-        segments.add(currentSegment!);
-        undoHistory.clear();
-        startPoint = endPoint;
-        currentSegment = null;
+
+        // Check if eraser is active
+        if (isEraserActive) {
+          segments.removeWhere((segment) =>
+          segment.start.distanceSquared <= 100.0 || segment.end.distanceSquared <= 100.0);
+          isDrawing = false; // Reset drawing state after erasing
+        } else {
+          currentSegment = SegmentElement(
+            color: currentColor,
+            strokeWidth: currentStrokeWidth,
+            start: startPoint!,
+            end: endPoint!,
+            // Initialize control points to be equal to start and end points for a straight line
+            startControl: startPoint!,
+            endControl: endPoint!,
+          );
+          segments.add(currentSegment!);
+          undoHistory.clear();
+
+          // Limit the number of segments
+          if (segments.length > maxSegments) {
+            segments.removeAt(0); // Remove the oldest segment
+          }
+
+          startPoint = endPoint;
+          currentSegment = null; // Reset the current segment
+        }
       }
     });
   }
+
+
 
   void _undo() {
     setState(() {
@@ -196,51 +227,90 @@ class _DrawingCanvasState extends State<DrawingCanvas> {
   }
 
   void _exportDrawing() async {
-    final recorder = ui.PictureRecorder();
-    final canvas = Canvas(recorder);
-    final size = MediaQuery.of(context).size;
+    try {
+      final recorder = ui.PictureRecorder();
+      final canvas = Canvas(recorder);
+      final size = MediaQuery.of(context).size;
 
-    final painter = DrawingPainter(segments, null);
-    painter.paint(canvas, size);
+      final painter = DrawingPainter(segments, null);
+      painter.paint(canvas, size);
 
-    final picture = recorder.endRecording();
-    final img = await picture.toImage(size.width.toInt(), size.height.toInt());
-    final pngBytes = await img.toByteData(format: ui.ImageByteFormat.png);
+      final picture = recorder.endRecording();
+      final img = await picture.toImage(size.width.toInt(), size.height.toInt());
+      final pngBytes = await img.toByteData(format: ui.ImageByteFormat.png);
 
-    final directory = await getApplicationDocumentsDirectory();
-    final file = File('${directory.path}/drawing.png');
-    await file.writeAsBytes(pngBytes!.buffer.asUint8List());
+      final directory = await getApplicationDocumentsDirectory();
+      final file = File('${directory.path}/drawing.png');
+      await file.writeAsBytes(pngBytes!.buffer.asUint8List());
 
-    await GallerySaver.saveImage(file.path);
+      await GallerySaver.saveImage(file.path);
 
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text('Drawing saved to gallery')),
-    );
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Drawing saved to gallery')),
+      );
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Error saving drawing')),
+      );
+    }
   }
 
   void _changeColor() {
-    setState(() {
-      if (currentColor == Colors.black) {
-        currentColor = Colors.red;
-      } else if (currentColor == Colors.red) {
-        currentColor = Colors.blue;
-      } else if (currentColor == Colors.blue) {
-        currentColor = Colors.green;
-      } else {
-        currentColor = Colors.black;
-      }
-    });
+    showDialog(
+      context: context,
+      builder: (BuildContext context) {
+        return AlertDialog(
+          title: const Text('Select Color'),
+          content: SingleChildScrollView(
+            child: BlockPicker(
+              pickerColor: currentColor,
+              onColorChanged: (Color color) {
+                setState(() {
+                  currentColor = color;
+                });
+                Navigator.of(context).pop(); // Close the dialog
+              },
+            ),
+          ),
+        );
+      },
+    );
   }
 
   void _changeStrokeWidth() {
+    showDialog(
+      context: context,
+      builder: (BuildContext context) {
+        return AlertDialog(
+          title: const Text('Select Stroke Width'),
+          content: SingleChildScrollView(
+            child: Slider(
+              value: currentStrokeWidth,
+              min: 1.0,
+              max: 20.0,
+              divisions: 19,
+              label: currentStrokeWidth.toString(),
+              onChanged: (double value) {
+                setState(() {
+                  currentStrokeWidth = value;
+                });
+              },
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(),
+              child: const Text('OK'),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
+  void _toggleEraser() {
     setState(() {
-      if (currentStrokeWidth == 3.0) {
-        currentStrokeWidth = 5.0;
-      } else if (currentStrokeWidth == 5.0) {
-        currentStrokeWidth = 8.0;
-      } else {
-        currentStrokeWidth = 3.0;
-      }
+      isEraserActive = !isEraserActive;
     });
   }
 }
