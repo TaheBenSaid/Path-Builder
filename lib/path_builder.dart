@@ -51,6 +51,7 @@ class _DrawingCanvasState extends State<DrawingCanvas> {
   bool isDrawing = false;
   bool isEraserActive = false; // Flag for eraser tool
   final int maxSegments = 100; // Limit on the number of segments
+  File? backgroundImage; // Variable to store the background image
 
   @override
   void dispose() {
@@ -85,6 +86,14 @@ class _DrawingCanvasState extends State<DrawingCanvas> {
         focusNode: _focusNode,
         child: Stack(
           children: [
+            if (backgroundImage != null) // Display background if selected
+              Positioned.fill(
+                child: SvgPicture.file(
+                  backgroundImage!,
+                  width: 50,
+                  height: 50,
+                ),
+              ),
             GestureDetector(
               onTapDown: _handleTapDown,
               child: CustomPaint(
@@ -93,10 +102,10 @@ class _DrawingCanvasState extends State<DrawingCanvas> {
               ),
             ),
             ...segments.expand((segment) => [
-                  _buildHandle(
-                      segment.start, segment.startControl, true, segment),
-                  _buildHandle(segment.end, segment.endControl, false, segment),
-                ]),
+              _buildHandle(
+                  segment.start, segment.startControl, true, segment),
+              _buildHandle(segment.end, segment.endControl, false, segment),
+            ]),
             Positioned(
               bottom: 16,
               left: 16,
@@ -125,8 +134,7 @@ class _DrawingCanvasState extends State<DrawingCanvas> {
                     child: const Text('Import'),
                   ),
                   ElevatedButton(
-                    onPressed:
-                        _startNewPath, // New button for starting a new path
+                    onPressed: _startNewPath,
                     child: const Text('New Path'),
                   ),
                 ],
@@ -173,32 +181,29 @@ class _DrawingCanvasState extends State<DrawingCanvas> {
       } else {
         endPoint = details.localPosition;
 
-        // Check if eraser is active
         if (isEraserActive) {
           segments.removeWhere((segment) =>
-              segment.start.distanceSquared <= 100.0 ||
+          segment.start.distanceSquared <= 100.0 ||
               segment.end.distanceSquared <= 100.0);
-          isDrawing = false; // Reset drawing state after erasing
+          isDrawing = false;
         } else {
           currentSegment = SegmentElement(
             color: currentColor,
             strokeWidth: currentStrokeWidth,
             start: startPoint!,
             end: endPoint!,
-            // Initialize control points to be equal to start and end points for a straight line
             startControl: startPoint!,
             endControl: endPoint!,
           );
           segments.add(currentSegment!);
           undoHistory.clear();
 
-          // Limit the number of segments
           if (segments.length > maxSegments) {
-            segments.removeAt(0); // Remove the oldest segment
+            segments.removeAt(0);
           }
 
           startPoint = endPoint;
-          currentSegment = null; // Reset the current segment
+          currentSegment = null;
         }
       }
     });
@@ -206,10 +211,10 @@ class _DrawingCanvasState extends State<DrawingCanvas> {
 
   void _startNewPath() {
     setState(() {
-      currentSegment = null; // Clear the current segment
-      startPoint = null; // Reset starting point
-      endPoint = null; // Reset ending point
-      isDrawing = false; // Reset drawing state
+      currentSegment = null;
+      startPoint = null;
+      endPoint = null;
+      isDrawing = false;
     });
   }
 
@@ -245,28 +250,26 @@ class _DrawingCanvasState extends State<DrawingCanvas> {
       startPoint = null;
       endPoint = null;
       isDrawing = false;
+      backgroundImage = null; // Clear background image when clearing canvas
     });
   }
 
   Future<void> _importDrawing() async {
-    final result = await FilePicker.platform
-        .pickFiles(type: FileType.custom, allowedExtensions: ['svg']);
+    final result = await FilePicker.platform.pickFiles(
+      type: FileType.custom,
+      allowedExtensions: ['svg'], // Allow only SVG files
+    );
     if (result != null && result.files.isNotEmpty) {
       setState(() {
-        SvgPicture.file(
-          File(result.files.first.path!),
-          width: 800, // Set your desired width
-          height: 600, // Set your desired height
-        );
+        backgroundImage = File(result.files.first.path!); // Set background image
       });
     }
   }
 
   void _exportDrawing() async {
-
     final svgPath = StringBuffer();
     svgPath.write(
-        '<svg xmlns="http://www.w3.org/2000/svg" width="800" height="600">\n');
+        '<svg xmlns="http://www.w3.org/2000/svg" width="1800" height="1600">\n');
 
     if (segments.isNotEmpty) {
       svgPath
@@ -296,71 +299,69 @@ class _DrawingCanvasState extends State<DrawingCanvas> {
 
     svgPath.write('</svg>');
 
-    // Get the directory to save the SVG
     final directory = await getApplicationDocumentsDirectory();
     final svgPathFile = '${directory.path}/exported_shape.svg';
-    // Write the SVG to a file
     final file = await File(svgPathFile).writeAsString(svgPath.toString());
 
-    // Display a message and print the file path
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(content: Text('SVG shape exported to ${file.path}')),
     );
-
-    // Print the path in the console
-    print('SVG file saved at: ${file.path}');
   }
 
   void _changeColor() {
     showDialog(
       context: context,
-      builder: (BuildContext context) {
-        return AlertDialog(
-          title: const Text('Select Color'),
-          content: SingleChildScrollView(
-            child: BlockPicker(
-              pickerColor: currentColor,
-              onColorChanged: (Color color) {
-                setState(() {
-                  currentColor = color;
-                });
-                Navigator.of(context).pop(); // Close the dialog
-              },
-            ),
+      builder: (context) => AlertDialog(
+        title: const Text('Pick a color'),
+        content: SingleChildScrollView(
+          child: BlockPicker(
+            pickerColor: currentColor,
+            onColorChanged: (color) {
+              setState(() {
+                currentColor = color;
+              });
+            },
           ),
-        );
-      },
+        ),
+        actions: [
+          ElevatedButton(
+            child: const Text('Done'),
+            onPressed: () {
+              Navigator.of(context).pop();
+            },
+          ),
+        ],
+      ),
     );
   }
 
   void _changeStrokeWidth() {
     showDialog(
       context: context,
-      builder: (BuildContext context) {
-        return AlertDialog(
-          title: const Text('Select Stroke Width'),
-          content: SingleChildScrollView(
-            child: Slider(
-              value: currentStrokeWidth,
-              min: 1.0,
-              max: 20.0,
-              divisions: 19,
-              label: currentStrokeWidth.toString(),
-              onChanged: (double value) {
-                setState(() {
-                  currentStrokeWidth = value;
-                });
-              },
-            ),
+      builder: (context) => AlertDialog(
+        title: const Text('Select stroke width'),
+        content: SingleChildScrollView(
+          child: Slider(
+            value: currentStrokeWidth,
+            min: 1.0,
+            max: 10.0,
+            divisions: 9,
+            onChanged: (value) {
+              setState(() {
+                currentStrokeWidth = value;
+              });
+            },
           ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.of(context).pop(),
-              child: const Text('OK'),
-            ),
-          ],
-        );
-      },
+        ),
+        actions: [
+          ElevatedButton(
+            child: const Text('Done'),
+            onPressed: () {
+              Navigator.of(context).pop();
+            },
+          ),
+        ],
+      ),
     );
   }
 
@@ -372,10 +373,10 @@ class _DrawingCanvasState extends State<DrawingCanvas> {
 }
 
 class SegmentElement {
-  final Color color;
-  final double strokeWidth;
-  final Offset start;
-  final Offset end;
+  Color color;
+  double strokeWidth;
+  Offset start;
+  Offset end;
   Offset startControl;
   Offset endControl;
 
@@ -387,36 +388,6 @@ class SegmentElement {
     required this.startControl,
     required this.endControl,
   });
-
-  void draw(Canvas canvas) {
-    Paint paint = Paint()
-      ..color = color
-      ..strokeCap = StrokeCap.round
-      ..strokeWidth = strokeWidth
-      ..style = PaintingStyle.stroke;
-
-    Path path = Path()
-      ..moveTo(start.dx, start.dy)
-      ..cubicTo(
-        startControl.dx,
-        startControl.dy,
-        endControl.dx,
-        endControl.dy,
-        end.dx,
-        end.dy,
-      );
-
-    canvas.drawPath(path, paint);
-
-    // Draw control points and handles for visualization
-    Paint controlPaint = Paint()
-      ..color = Colors.red
-      ..strokeWidth = 1;
-    canvas.drawCircle(startControl, 4, controlPaint);
-    canvas.drawCircle(endControl, 4, controlPaint);
-    canvas.drawLine(start, startControl, controlPaint);
-    canvas.drawLine(end, endControl, controlPaint);
-  }
 }
 
 class DrawingPainter extends CustomPainter {
@@ -427,14 +398,52 @@ class DrawingPainter extends CustomPainter {
 
   @override
   void paint(Canvas canvas, Size size) {
-    for (var segment in segments) {
-      segment.draw(canvas);
+    final paint = Paint()
+      ..style = PaintingStyle.stroke
+      ..strokeCap = StrokeCap.round;
+
+    for (final segment in segments) {
+      paint.color = segment.color;
+      paint.strokeWidth = segment.strokeWidth;
+
+      if (segment.startControl == segment.start &&
+          segment.endControl == segment.end) {
+        canvas.drawLine(segment.start, segment.end, paint);
+      } else {
+        final path = Path();
+        path.moveTo(segment.start.dx, segment.start.dy);
+        path.cubicTo(
+          segment.startControl.dx,
+          segment.startControl.dy,
+          segment.endControl.dx,
+          segment.endControl.dy,
+          segment.end.dx,
+          segment.end.dy,
+        );
+        canvas.drawPath(path, paint);
+      }
     }
+
     if (currentSegment != null) {
-      currentSegment!.draw(canvas);
+      paint.color = currentSegment!.color;
+      paint.strokeWidth = currentSegment!.strokeWidth;
+
+      final path = Path();
+      path.moveTo(currentSegment!.start.dx, currentSegment!.start.dy);
+      path.cubicTo(
+        currentSegment!.startControl.dx,
+        currentSegment!.startControl.dy,
+        currentSegment!.endControl.dx,
+        currentSegment!.endControl.dy,
+        currentSegment!.end.dx,
+        currentSegment!.end.dy,
+      );
+      canvas.drawPath(path, paint);
     }
   }
 
   @override
-  bool shouldRepaint(covariant CustomPainter oldDelegate) => true;
+  bool shouldRepaint(CustomPainter oldDelegate) {
+    return true;
+  }
 }
