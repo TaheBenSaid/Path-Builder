@@ -1,6 +1,28 @@
+import 'dart:io';
+import 'dart:ui' as ui;
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
+import 'package:path_provider/path_provider.dart';
+import 'package:gallery_saver/gallery_saver.dart';
 
+void main() {
+  runApp(const MyApp());
+}
 
+class MyApp extends StatelessWidget {
+  const MyApp({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return MaterialApp(
+      title: 'My Custom Drawing App',
+      theme: ThemeData(
+        primarySwatch: Colors.blue,
+      ),
+      home: const DrawingCanvas(),
+    );
+  }
+}
 
 class DrawingCanvas extends StatefulWidget {
   const DrawingCanvas({super.key});
@@ -10,12 +32,15 @@ class DrawingCanvas extends StatefulWidget {
 }
 
 class _DrawingCanvasState extends State<DrawingCanvas> {
-  List<List<Offset>> strokes = [];
-  List<Offset> currentStroke = [];
-  List<List<Offset>> undoHistory = [];
+  List<SegmentElement> segments = [];
+  SegmentElement? currentSegment;
+  List<SegmentElement> undoHistory = [];
   Color currentColor = Colors.black;
   double currentStrokeWidth = 3.0;
   final FocusNode _focusNode = FocusNode();
+  Offset? startPoint;
+  Offset? endPoint;
+  bool isDrawing = false;
 
   @override
   void dispose() {
@@ -44,28 +69,16 @@ class _DrawingCanvasState extends State<DrawingCanvas> {
         child: Stack(
           children: [
             GestureDetector(
-              onPanStart: (details) {
-                setState(() {
-                  currentStroke = [details.localPosition];
-                });
-              },
-              onPanUpdate: (details) {
-                setState(() {
-                  currentStroke.add(details.localPosition);
-                });
-              },
-              onPanEnd: (details) {
-                setState(() {
-                  strokes.add(List.from(currentStroke));
-                  currentStroke.clear();
-                  undoHistory.clear();
-                });
-              },
+              onTapDown: _handleTapDown,
               child: CustomPaint(
-                painter: DrawingPainter(strokes, currentStroke, currentColor, currentStrokeWidth),
+                painter: DrawingPainter(segments, currentSegment),
                 size: Size.infinite,
               ),
             ),
+            ...segments.expand((segment) => [
+              _buildHandle(segment.start, segment.startControl, true, segment),
+              _buildHandle(segment.end, segment.endControl, false, segment),
+            ]),
             Positioned(
               bottom: 16,
               left: 16,
@@ -98,10 +111,65 @@ class _DrawingCanvasState extends State<DrawingCanvas> {
     );
   }
 
+  Widget _buildHandle(Offset point, Offset control, bool isStart, SegmentElement segment) {
+    return Positioned(
+      left: control.dx - 5,
+      top: control.dy - 5,
+      child: GestureDetector(
+        onPanUpdate: (details) {
+          setState(() {
+            if (isStart) {
+              segment.startControl = segment.startControl + details.delta;
+            } else {
+              segment.endControl = segment.endControl + details.delta;
+            }
+          });
+        },
+        child: Container(
+          width: 10,
+          height: 10,
+          decoration: BoxDecoration(
+            color: Colors.red,
+            shape: BoxShape.circle,
+          ),
+        ),
+      ),
+    );
+  }
+
+  void _handleTapDown(TapDownDetails details) {
+    setState(() {
+      if (!isDrawing) {
+        startPoint = details.localPosition;
+        isDrawing = true;
+      } else {
+        endPoint = details.localPosition;
+        currentSegment = SegmentElement(
+          color: currentColor,
+          strokeWidth: currentStrokeWidth,
+          start: startPoint!,
+          end: endPoint!,
+          startControl: startPoint! + const Offset(50, -50),
+          endControl: endPoint! + const Offset(-50, -50),
+        );
+        segments.add(currentSegment!);
+        undoHistory.clear();
+        startPoint = endPoint;
+        currentSegment = null;
+      }
+    });
+  }
+
   void _undo() {
     setState(() {
-      if (strokes.isNotEmpty) {
-        undoHistory.add(strokes.removeLast());
+      if (segments.isNotEmpty) {
+        undoHistory.add(segments.removeLast());
+      }
+      if (segments.isEmpty) {
+        isDrawing = false;
+        startPoint = null;
+      } else {
+        startPoint = segments.last.end;
       }
     });
   }
@@ -109,26 +177,48 @@ class _DrawingCanvasState extends State<DrawingCanvas> {
   void _redo() {
     setState(() {
       if (undoHistory.isNotEmpty) {
-        strokes.add(undoHistory.removeLast());
+        segments.add(undoHistory.removeLast());
+        startPoint = segments.last.end;
+        isDrawing = true;
       }
     });
   }
 
   void _clearCanvas() {
     setState(() {
-      strokes.clear();
+      segments.clear();
       undoHistory.clear();
+      currentSegment = null;
+      startPoint = null;
+      endPoint = null;
+      isDrawing = false;
     });
   }
 
-  void _exportDrawing() {
-    // Implement export functionality here
-    // For now, we'll just print a message
-    print('Exporting drawing...');
+  void _exportDrawing() async {
+    final recorder = ui.PictureRecorder();
+    final canvas = Canvas(recorder);
+    final size = MediaQuery.of(context).size;
+
+    final painter = DrawingPainter(segments, null);
+    painter.paint(canvas, size);
+
+    final picture = recorder.endRecording();
+    final img = await picture.toImage(size.width.toInt(), size.height.toInt());
+    final pngBytes = await img.toByteData(format: ui.ImageByteFormat.png);
+
+    final directory = await getApplicationDocumentsDirectory();
+    final file = File('${directory.path}/drawing.png');
+    await file.writeAsBytes(pngBytes!.buffer.asUint8List());
+
+    await GallerySaver.saveImage(file.path);
+
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text('Drawing saved to gallery')),
+    );
   }
 
   void _changeColor() {
-    // For simplicity, we'll just cycle through a few colors
     setState(() {
       if (currentColor == Colors.black) {
         currentColor = Colors.red;
@@ -143,7 +233,6 @@ class _DrawingCanvasState extends State<DrawingCanvas> {
   }
 
   void _changeStrokeWidth() {
-    // Cycle through a few stroke widths
     setState(() {
       if (currentStrokeWidth == 3.0) {
         currentStrokeWidth = 5.0;
@@ -156,29 +245,64 @@ class _DrawingCanvasState extends State<DrawingCanvas> {
   }
 }
 
-class DrawingPainter extends CustomPainter {
-  final List<List<Offset>> strokes;
-  final List<Offset> currentStroke;
-  final Color strokeColor;
+class SegmentElement {
+  final Color color;
   final double strokeWidth;
+  final Offset start;
+  final Offset end;
+  Offset startControl;
+  Offset endControl;
 
-  DrawingPainter(this.strokes, this.currentStroke, this.strokeColor, this.strokeWidth);
+  SegmentElement({
+    required this.color,
+    required this.strokeWidth,
+    required this.start,
+    required this.end,
+    required this.startControl,
+    required this.endControl,
+  });
+
+  void draw(Canvas canvas) {
+    Paint paint = Paint()
+      ..color = color
+      ..strokeCap = StrokeCap.round
+      ..strokeWidth = strokeWidth
+      ..style = PaintingStyle.stroke;
+
+    Path path = Path()
+      ..moveTo(start.dx, start.dy)
+      ..cubicTo(
+        startControl.dx, startControl.dy,
+        endControl.dx, endControl.dy,
+        end.dx, end.dy,
+      );
+
+    canvas.drawPath(path, paint);
+
+    // Draw control points and handles for visualization
+    Paint controlPaint = Paint()
+      ..color = Colors.red
+      ..strokeWidth = 1;
+    canvas.drawCircle(startControl, 4, controlPaint);
+    canvas.drawCircle(endControl, 4, controlPaint);
+    canvas.drawLine(start, startControl, controlPaint);
+    canvas.drawLine(end, endControl, controlPaint);
+  }
+}
+
+class DrawingPainter extends CustomPainter {
+  final List<SegmentElement> segments;
+  final SegmentElement? currentSegment;
+
+  DrawingPainter(this.segments, this.currentSegment);
 
   @override
   void paint(Canvas canvas, Size size) {
-    Paint paint = Paint()
-      ..color = strokeColor
-      ..strokeCap = StrokeCap.round
-      ..strokeWidth = strokeWidth;
-
-    for (final stroke in strokes) {
-      for (int i = 0; i < stroke.length - 1; i++) {
-        canvas.drawLine(stroke[i], stroke[i + 1], paint);
-      }
+    for (var segment in segments) {
+      segment.draw(canvas);
     }
-
-    for (int i = 0; i < currentStroke.length - 1; i++) {
-      canvas.drawLine(currentStroke[i], currentStroke[i + 1], paint);
+    if (currentSegment != null) {
+      currentSegment!.draw(canvas);
     }
   }
 
