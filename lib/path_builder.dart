@@ -49,9 +49,11 @@ class _DrawingCanvasState extends State<DrawingCanvas> {
   Offset? startPoint;
   Offset? endPoint;
   bool isDrawing = false;
-  bool isEraserActive = false; // Flag for eraser tool
-  final int maxSegments = 100; // Limit on the number of segments
-  File? backgroundImage; // Variable to store the background image
+  bool isEraserActive = false;
+  final int maxSegments = 100;
+  File? backgroundImage;
+  SegmentElement? selectedSegment;
+  bool isStartControlSelected = false;
 
   @override
   void dispose() {
@@ -86,7 +88,7 @@ class _DrawingCanvasState extends State<DrawingCanvas> {
         focusNode: _focusNode,
         child: Stack(
           children: [
-            if (backgroundImage != null) // Display background if selected
+            if (backgroundImage != null)
               Positioned.fill(
                 child: SvgPicture.file(
                   backgroundImage!,
@@ -97,7 +99,7 @@ class _DrawingCanvasState extends State<DrawingCanvas> {
             GestureDetector(
               onTapDown: _handleTapDown,
               child: CustomPaint(
-                painter: DrawingPainter(segments, currentSegment),
+                painter: DrawingPainter(segments, currentSegment, selectedSegment, isStartControlSelected),
                 size: Size.infinite,
               ),
             ),
@@ -152,6 +154,12 @@ class _DrawingCanvasState extends State<DrawingCanvas> {
       left: control.dx - 5,
       top: control.dy - 5,
       child: GestureDetector(
+        onPanStart: (_) {
+          setState(() {
+            selectedSegment = segment;
+            isStartControlSelected = isStart;
+          });
+        },
         onPanUpdate: (details) {
           setState(() {
             if (isStart) {
@@ -159,6 +167,11 @@ class _DrawingCanvasState extends State<DrawingCanvas> {
             } else {
               segment.endControl = segment.endControl + details.delta;
             }
+          });
+        },
+        onPanEnd: (_) {
+          setState(() {
+            selectedSegment = null;
           });
         },
         child: Container(
@@ -250,18 +263,18 @@ class _DrawingCanvasState extends State<DrawingCanvas> {
       startPoint = null;
       endPoint = null;
       isDrawing = false;
-      backgroundImage = null; // Clear background image when clearing canvas
+      backgroundImage = null;
     });
   }
 
   Future<void> _importDrawing() async {
     final result = await FilePicker.platform.pickFiles(
       type: FileType.custom,
-      allowedExtensions: ['svg'], // Allow only SVG files
+      allowedExtensions: ['svg'],
     );
     if (result != null && result.files.isNotEmpty) {
       setState(() {
-        backgroundImage = File(result.files.first.path!); // Set background image
+        backgroundImage = File(result.files.first.path!);
       });
     }
   }
@@ -393,8 +406,10 @@ class SegmentElement {
 class DrawingPainter extends CustomPainter {
   final List<SegmentElement> segments;
   final SegmentElement? currentSegment;
+  final SegmentElement? selectedSegment;
+  final bool isStartControlSelected;
 
-  DrawingPainter(this.segments, this.currentSegment);
+  DrawingPainter(this.segments, this.currentSegment, this.selectedSegment, this.isStartControlSelected);
 
   @override
   void paint(Canvas canvas, Size size) {
@@ -439,6 +454,18 @@ class DrawingPainter extends CustomPainter {
         currentSegment!.end.dy,
       );
       canvas.drawPath(path, paint);
+    }
+
+    // Draw control point lines if a segment is selected
+    if (selectedSegment != null) {
+      paint.color = Colors.red;
+      paint.strokeWidth = 1;
+
+      if (isStartControlSelected) {
+        canvas.drawLine(selectedSegment!.start, selectedSegment!.startControl, paint);
+      } else {
+        canvas.drawLine(selectedSegment!.end, selectedSegment!.endControl, paint);
+      }
     }
   }
 
