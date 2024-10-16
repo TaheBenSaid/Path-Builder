@@ -284,6 +284,16 @@ class _DrawingCanvasState extends State<DrawingCanvas> {
     svgPath.write(
         '<svg xmlns="http://www.w3.org/2000/svg" width="1800" height="1600">\n');
 
+    // Include the background image if it exists
+    if (backgroundImage != null) {
+      final imageContent = await backgroundImage!.readAsString();
+      final imageXmlContent = imageContent.substring(
+        imageContent.indexOf('<svg') + 4,
+        imageContent.lastIndexOf('</svg>'),
+      );
+      svgPath.write(imageXmlContent);
+    }
+
     if (segments.isNotEmpty) {
       svgPath
           .write('<path d="M${segments[0].start.dx},${segments[0].start.dy} ');
@@ -313,12 +323,14 @@ class _DrawingCanvasState extends State<DrawingCanvas> {
     svgPath.write('</svg>');
 
     final directory = await getApplicationDocumentsDirectory();
-    final svgPathFile = '${directory.path}/exported_shape.svg';
+    final svgPathFile = '${directory.path}/exported_drawing.svg';
     final file = await File(svgPathFile).writeAsString(svgPath.toString());
 
+    print('SVG drawing exported to ${file.path}');
     ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text('SVG shape exported to ${file.path}')),
+      SnackBar(content: Text('SVG drawing exported to ${file.path}')),
     );
+
   }
 
   void _changeColor() {
